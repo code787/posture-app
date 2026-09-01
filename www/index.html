@@ -229,24 +229,56 @@ async function speak(text) {
 }
    // ===== 请求摄像头权限 =====
     async function requestCameraPermission() {
+      postureBar.textContent = '🔐 正在请求摄像头权限...';
+      postureBar.className = 'warn';
+
       // 如果是在 Capacitor WebView 中
-      if (window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.Camera) {
+      if (window.Capacitor) {
+        console.log('Running in Capacitor environment');
+        
+        // 方法1: 使用 Capacitor Camera 插件
+        if (window.Capacitor.Plugins && window.Capacitor.Plugins.Camera) {
+          try {
+            console.log('Requesting permission via Capacitor Camera plugin');
+            var status = await window.Capacitor.Plugins.Camera.requestPermissions();
+            console.log('Camera permission status:', status);
+            if (status.camera === 'granted') return true;
+          } catch (e) {
+            console.warn('Capacitor Camera plugin failed:', e);
+          }
+        }
+
+        // 方法2: 直接调用原生 Android 权限请求
         try {
-          var status = await window.Capacitor.Plugins.Camera.requestPermissions();
-          return status.camera === 'granted';
+          console.log('Trying native permission request');
+          var result = await window.Capacitor.Plugins.Permissions.requestPermissions(
+            { permissions: ['android.permission.CAMERA'] }
+          );
+          console.log('Native permission result:', result);
+          if (result['android.permission.CAMERA'] === 'granted') return true;
         } catch (e) {
-          console.warn('Capacitor Camera permission failed:', e);
+          console.warn('Native permission request failed:', e);
         }
       }
 
       // 回退到标准 Web API
       try {
-        var stream = await navigator.mediaDevices.getUserMedia({ video: true });
+        console.log('Trying Web API getUserMedia');
+        var stream = await navigator.mediaDevices.getUserMedia({ 
+          video: { 
+            facingMode: 'user',
+            width: { ideal: 640 },
+            height: { ideal: 480 }
+          } 
+        });
         stream.getTracks().forEach(function(track) { track.stop(); });
+        console.log('Web API permission granted');
         return true;
       } catch (e) {
         console.error('Camera permission denied:', e);
-        alert('无法获取摄像头权限，请在系统设置中允许此应用使用摄像头。');
+        postureBar.textContent = '❌ 摄像头权限被拒绝，请手动开启';
+        postureBar.className = 'bad';
+        alert('无法获取摄像头权限。\n\n请前往：\n设置 → 应用管理 → 坐姿检测 → 权限\n开启摄像头权限后重试');
         return false;
       }
     }
