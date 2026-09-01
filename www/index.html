@@ -1,0 +1,461 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>坐姿检测</title>
+  <style>
+    body {
+      margin: 0;
+      font-family: "Microsoft YaHei", sans-serif;
+      background: #111;
+      color: #eee;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      padding: 20px;
+    }
+
+    h2 {
+      margin: 10px 0;
+    }
+
+    #container {
+      position: relative;
+      width: 640px;
+      max-width: 100%;
+      height: 480px;
+      background: #000;
+      border-radius: 8px;
+      overflow: hidden;
+    }
+
+    video, canvas {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+    }
+
+    #postureBar {
+      margin-top: 15px;
+      padding: 10px 20px;
+      font-size: 18px;
+      border-radius: 6px;
+      text-align: center;
+      width: 600px;
+      max-width: 100%;
+      box-sizing: border-box;
+    }
+
+    .good { background: #2e7d32; }
+    .warn { background: #f9a825; color: #000; }
+    .bad  { background: #c62828; }
+
+    #details {
+      margin-top: 15px;
+      font-size: 14px;
+      line-height: 1.8;
+      background: #222;
+      padding: 10px 20px;
+      border-radius: 6px;
+      width: 600px;
+      max-width: 100%;
+      box-sizing: border-box;
+    }
+
+    button {
+      margin-top: 15px;
+      padding: 10px 25px;
+      font-size: 16px;
+      border: none;
+      border-radius: 6px;
+      background: #00d2ff;
+      color: #000;
+      cursor: pointer;
+    }
+
+    button:hover {
+      background: #00b8e6;
+    }
+  </style>
+</head>
+<body>
+
+  <h2>坐姿检测</h2>
+
+  <div id="container">
+    <video id="video" autoplay playsinline></video>
+    <canvas id="canvas"></canvas>
+  </div>
+
+  <div id="postureBar" class="warn">点击开始检测</div>
+
+  <div id="details">
+    俯仰角：<span id="pitchAngle">0</span>°<br>
+    面部朝下：<span id="faceDown">0</span><br>
+    鼻子与肩膀差值：<span id="noseShoulder">0</span><br>
+    歪头角度：<span id="tiltAngle">0</span>°<br>
+    躯干前倾角度：<span id="leanAngle">0</span>°<br>
+    不良持续时间：<span id="badDuration">0</span>秒
+  </div>
+
+  <button id="startBtn">开始检测</button>
+
+  <!-- MediaPipe 依赖 -->
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/pose/pose.js"></script>
+
+  <!-- 主逻辑 -->
+  <script>
+       // ===== 页面元素 =====
+    var video = document.getElementById('video');
+    var canvas = document.getElementById('canvas');
+    var ctx = canvas.getContext('2d');
+    var postureBar = document.getElementById('postureBar');
+    var startBtn = document.getElementById('startBtn');
+
+    // ===== 检测状态 =====
+    var isRunning = false;
+    var cameraInstance = null;
+    var poseInstance = null;
+
+    // ===== 平滑与阈值 =====
+    var SMOOTH_FACTOR = 0.3;
+    var PITCH_THRESH = 20;
+    var FACE_DOWN_THRESH = 0.4;
+    var TILT_THRESH = 12;
+    var LEAN_THRESH = 25;
+    var DELAY_THRESH = 3;
+
+    // ===== 平滑值 =====
+    var smoothPitch = 0;
+    var smoothTilt = 0;
+    var smoothLean = 0;
+
+    // ===== 提醒控制 =====
+    var badStartTime = null;
+    var lastSpeakTime = 0;
+
+    // ===== 校准相关变量 =====
+    var isCalibrating = false;
+    var calibrationFrames = [];
+    var CALIBRATION_DURATION = 5000;
+    var calibrationStartTime = 0;
+    var baseline = null;
+
+// ===== 语音提醒=====
+var voicesLoaded = false;
+var voices = [];
+
+// 加载语音列表
+function loadVoices() {
+  voices = speechSynthesis.getVoices();
+  if (voices.length > 0) {
+    voicesLoaded = true;
+  }
+}
+
+// 部分浏览器异步加载语音，需要监听事件
+if (window.speechSynthesis) {
+  loadVoices();
+  speechSynthesis.onvoiceschanged = loadVoices;
+}
+
+// 确保语音系统就绪后再允许说话
+function ensureSpeechReady() {
+  if (!window.speechSynthesis) return false;
+  if (voicesLoaded) return true;
+  // 等待语音列表加载
+  return new Promise(resolve => {
+    const check = () => {
+      if (voicesLoaded) {
+        resolve(true);
+      } else {
+        setTimeout(check, 100);
+      }
+    };
+    check();
+  });
+}
+
+async function speak(text) {
+  if (!window.speechSynthesis) return;
+
+  // 确保语音系统就绪
+  await ensureSpeechReady();
+
+  // 先清空队列，防止堆积
+  speechSynthesis.cancel();
+
+  // 等待队列清空
+  await new Promise(resolve => setTimeout(resolve, 50));
+
+  setTimeout(function() {
+    var utter = new SpeechSynthesisUtterance(text);
+    utter.lang = 'zh-CN';
+    utter.rate = 0.8;
+    utter.volume = 1;
+
+    // 优先选择中文语音
+    if (voicesLoaded && voices.length > 0) {
+      var zhVoice = voices.find(function(v) {
+        return v.lang.indexOf('zh') !== -1;
+      });
+      if (zhVoice) {
+        utter.voice = zhVoice;
+      } else {
+        // 如果没有找到中文语音，使用第一个可用语音
+        if (voices.length > 0) {
+          utter.voice = voices[0];
+        }
+      }
+    }
+
+    // 显示调试信息
+    console.log('Speaking:', text, 'Voice:', utter.voice ? utter.voice.name : 'default');
+
+    speechSynthesis.speak(utter);
+
+    // 3秒后检查是否仍在合成（如果还在则说明可能有问题）
+    setTimeout(function() {
+      if (speechSynthesis.speaking) {
+        console.warn('Speech still playing after 3s - possible issue');
+      }
+    }, 3000);
+  }, 150);
+}
+   // ===== 开始检测 =====
+    startBtn.addEventListener('click', function() {
+      if (isRunning) return;
+
+      if (!poseInstance) {
+        poseInstance = new Pose({
+          locateFile: function(file) {
+            return 'https://cdn.jsdelivr.net/npm/@mediapipe/pose/' + file;
+          }
+        });
+
+        poseInstance.setOptions({
+          modelComplexity: 1,
+          smoothLandmarks: true,
+          enableSegmentation: false,
+          minDetectionConfidence: 0.5,
+          minTrackingConfidence: 0.5
+        });
+
+        poseInstance.onResults(onResults);
+      }
+
+      cameraInstance = new Camera(video, {
+        onFrame: function() {
+          return poseInstance.send({ image: video });
+        },
+        width: 640,
+        height: 480
+      });
+
+      cameraInstance.start();
+
+      isRunning = true;
+      isCalibrating = true;
+      calibrationFrames = [];
+      calibrationStartTime = Date.now();
+      baseline = null;
+      smoothPitch = 0;
+      smoothTilt = 0;
+      smoothLean = 0;
+    });
+
+    // ===== 核心检测逻辑 =====
+    function onResults(results) {
+      if (!isRunning) return;
+
+      canvas.width = video.videoWidth || 640;
+      canvas.height = video.videoHeight || 480;
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+      if (!results.poseLandmarks) {
+        postureBar.textContent = '⚠️ 未检测到人，请调整位置';
+        postureBar.className = 'warn';
+        return;
+      }
+
+      var lm = results.poseLandmarks;
+
+      // 绘制骨架
+      if (window.drawConnectors && window.POSE_CONNECTIONS) {
+        drawConnectors(ctx, lm, POSE_CONNECTIONS, { color: '#00d2ff', lineWidth: 2 });
+        drawLandmarks(ctx, lm, { color: '#ff0066', lineWidth: 1, radius: 3 });
+      }
+
+      var nose = lm[0];
+      var leftEye = lm[5];
+      var rightEye = lm[2];
+      var leftShoulder = lm[11];
+      var rightShoulder = lm[12];
+      var leftHip = lm[23];
+      var rightHip = lm[24];
+
+      var shoulderMidX = (leftShoulder.x + rightShoulder.x) / 2;
+      var shoulderMidY = (leftShoulder.y + rightShoulder.y) / 2;
+      var eyeMidY = (leftEye.y + rightEye.y) / 2;
+      var hipMidX = (leftHip.x + rightHip.x) / 2;
+      var hipMidY = (leftHip.y + rightHip.y) / 2;
+      var shoulderWidth = Math.abs(leftShoulder.x - rightShoulder.x);
+
+      // ===== 计算当前帧原始值 =====
+      var noseShoulderDiff = shoulderMidY - nose.y;
+      var normalizedNoseDrop = shoulderWidth > 0.01 ? noseShoulderDiff / shoulderWidth : 0;
+
+      var eyeShoulderDiff = shoulderMidY - eyeMidY;
+      var normalizedEyeDrop = shoulderWidth > 0.01 ? eyeShoulderDiff / shoulderWidth : 0;
+
+      // 计算鼻子到肩膀中点的距离（归一化）
+      var noseToShoulderDist = Math.sqrt(
+        Math.pow(nose.x - shoulderMidX, 2) + Math.pow(nose.y - shoulderMidY, 2)
+      );
+      var normalizedNoseDist = shoulderWidth > 0.01 ? noseToShoulderDist / shoulderWidth : 1;
+
+      var dx = rightShoulder.x - leftShoulder.x;
+      var dy = rightShoulder.y - leftShoulder.y;
+      var currentTilt = Math.abs(Math.atan2(dy, dx) * (180 / Math.PI));
+
+      var torsoDx = nose.x - hipMidX;
+      var torsoDy = nose.y - hipMidY;
+      var currentLean = Math.abs(Math.atan2(torsoDx, torsoDy) * (180 / Math.PI));
+
+      // ===== 校准阶段 =====
+      if (isCalibrating) {
+        calibrationFrames.push({
+          noseDrop: normalizedNoseDrop,
+          eyeDrop: normalizedEyeDrop,
+          tilt: currentTilt,
+          lean: currentLean,
+          noseDist: normalizedNoseDist
+        });
+
+        var elapsed = Date.now() - calibrationStartTime;
+        var remaining = Math.ceil((CALIBRATION_DURATION - elapsed) / 1000);
+
+        postureBar.textContent = '📐 请保持正常坐姿，校准中... ' + remaining + '秒';
+        postureBar.className = 'warn';
+
+        if (elapsed >= CALIBRATION_DURATION) {
+          calibrationFrames.sort(function(a, b) {
+            return a.noseDrop - b.noseDrop;
+          });
+
+          var midIdx = Math.floor(calibrationFrames.length / 2);
+
+          baseline = {
+            noseDrop: calibrationFrames[midIdx].noseDrop,
+            eyeDrop: calibrationFrames[midIdx].eyeDrop,
+            tilt: calibrationFrames[midIdx].tilt,
+            lean: calibrationFrames[midIdx].lean,
+            noseDist: calibrationFrames[midIdx].noseDist
+          };
+
+          isCalibrating = false;
+          calibrationFrames = [];
+
+          smoothPitch = 0;
+          smoothTilt = 0;
+          smoothLean = 0;
+
+          postureBar.textContent = '✅ 校准完成！坐姿良好，继续保持！';
+          postureBar.className = 'good';
+        }
+        return;
+      }
+
+      // ===== 未校准时不检测 =====
+      if (!baseline) return;
+
+      // ===== 基于基准值计算偏差 =====
+
+      // 垂直方向偏差（检测抬头）
+      var pitchDeltaVertical = normalizedNoseDrop - baseline.noseDrop;
+
+      // 距离偏差（检测低头）：低头时鼻子靠近肩膀，距离变小，差值为负
+      var distDelta = normalizedNoseDist - baseline.noseDist;
+      var pitchDeltaDown = Math.max(0, -distDelta * 300);
+
+      // 综合：抬头用垂直偏差，低头用距离偏差
+      var rawPitch = Math.min(90, Math.max(0, pitchDeltaVertical * 150 + pitchDeltaDown));
+
+      smoothPitch = smoothPitch * (1 - SMOOTH_FACTOR) + rawPitch * SMOOTH_FACTOR;
+
+      var faceDelta = normalizedEyeDrop - baseline.eyeDrop;
+      var faceDownScore = Math.min(1, Math.max(0, faceDelta * 5));
+
+      var tiltDelta = currentTilt - baseline.tilt;
+      var rawTilt = Math.abs(tiltDelta);
+      smoothTilt = smoothTilt * (1 - SMOOTH_FACTOR) + rawTilt * SMOOTH_FACTOR;
+
+      var leanDelta = currentLean - baseline.lean;
+      var rawLean = Math.max(0, leanDelta);
+      smoothLean = smoothLean * (1 - SMOOTH_FACTOR) + rawLean * SMOOTH_FACTOR;
+
+      // ===== 综合判断 =====
+      var pitchBad = smoothPitch > PITCH_THRESH;
+      var faceBad = faceDownScore > FACE_DOWN_THRESH;
+      var tiltBad = smoothTilt > TILT_THRESH;
+      var leanBad = smoothLean > LEAN_THRESH;
+
+      var isBadPosture = pitchBad || faceBad || tiltBad || leanBad;
+
+      // 更新详情面板
+      document.getElementById('pitchAngle').textContent = smoothPitch.toFixed(1);
+      document.getElementById('faceDown').textContent = faceDownScore.toFixed(2);
+      document.getElementById('noseShoulder').textContent = noseShoulderDiff.toFixed(3);
+      document.getElementById('tiltAngle').textContent = smoothTilt.toFixed(1);
+      document.getElementById('leanAngle').textContent = smoothLean.toFixed(1);
+
+      // ===== 状态显示与提醒 =====
+      if (isBadPosture) {
+        if (!badStartTime) badStartTime = Date.now();
+
+        var badDuration = (Date.now() - badStartTime) / 1000;
+        document.getElementById('badDuration').textContent = badDuration.toFixed(1);
+
+        if (badDuration >= DELAY_THRESH) {
+          postureBar.textContent = '❌ 坐姿不良！请挺直背部、抬高头部';
+          postureBar.className = 'bad';
+
+          var now = Date.now();
+          if (now - lastSpeakTime > 10000) {
+            lastSpeakTime = now;
+
+            var msg = '';
+            if (pitchBad) msg = '请注意，你正在低头或抬头，请保持头部端正。';
+            else if (faceBad) msg = '面部过于朝下，请调整坐姿。';
+
+            if (tiltBad) msg += ' 注意不要歪头。';
+            if (leanBad) msg += ' 请挺直背部，不要趴在桌上。';
+
+            speak(msg || '请注意坐姿。');
+          }
+        } else {
+          postureBar.textContent = '⚠️ 坐姿异常，请调整（' + (DELAY_THRESH - badDuration).toFixed(0) + '秒后提醒）';
+          postureBar.className = 'warn';
+        }
+      } else {
+        badStartTime = null;
+        document.getElementById('badDuration').textContent = '0';
+        postureBar.textContent = '✅ 坐姿良好，继续保持！';
+        postureBar.className = 'good';
+      }
+    }
+
+    // ===== 页面关闭时清理 =====
+    window.addEventListener('beforeunload', function() {
+      if (cameraInstance) cameraInstance.stop();
+      speechSynthesis.cancel();
+    });
+  </script>
+</body>
+</html>
+
