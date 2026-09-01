@@ -227,9 +227,41 @@ async function speak(text) {
     }, 3000);
   }, 150);
 }
-   // ===== 开始检测 =====
-    startBtn.addEventListener('click', function() {
+   // ===== 请求摄像头权限 =====
+    async function requestCameraPermission() {
+      // 如果是在 Capacitor WebView 中
+      if (window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.Camera) {
+        try {
+          var status = await window.Capacitor.Plugins.Camera.requestPermissions();
+          return status.camera === 'granted';
+        } catch (e) {
+          console.warn('Capacitor Camera permission failed:', e);
+        }
+      }
+
+      // 回退到标准 Web API
+      try {
+        var stream = await navigator.mediaDevices.getUserMedia({ video: true });
+        stream.getTracks().forEach(function(track) { track.stop(); });
+        return true;
+      } catch (e) {
+        console.error('Camera permission denied:', e);
+        alert('无法获取摄像头权限，请在系统设置中允许此应用使用摄像头。');
+        return false;
+      }
+    }
+
+    // ===== 开始检测 =====
+    startBtn.addEventListener('click', async function() {
       if (isRunning) return;
+
+      // 先请求摄像头权限
+      var hasPermission = await requestCameraPermission();
+      if (!hasPermission) {
+        postureBar.textContent = '❌ 摄像头权限被拒绝';
+        postureBar.className = 'bad';
+        return;
+      }
 
       if (!poseInstance) {
         poseInstance = new Pose({
