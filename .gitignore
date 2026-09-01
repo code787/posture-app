@@ -5,3 +5,4 @@ android/
 .idea/
 *.iml
 local.properties
+*.apk
