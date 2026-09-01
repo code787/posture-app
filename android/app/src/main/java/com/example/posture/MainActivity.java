@@ -6,7 +6,7 @@ import android.os.Bundle;
 import androidx.core.app.ActivityCompat;
 import androidx.core.content.ContextCompat;
 import com.getcapacitor.BridgeActivity;
-import com.getcapacitor.plugin.camera.Camera;
+import com.capacitorjs.plugins.camera.CameraPlugin;
 
 public class MainActivity extends BridgeActivity {
   
@@ -14,7 +14,7 @@ public class MainActivity extends BridgeActivity {
   
   @Override
   public void onCreate(Bundle savedInstanceState) {
-    registerPlugin(Camera.class);
+    registerPlugin(CameraPlugin.class);
     super.onCreate(savedInstanceState);
     
     // 启动时立即请求摄像头权限
@@ -33,6 +33,5 @@ public class MainActivity extends BridgeActivity {
   @Override
   public void onRequestPermissionsResult(int requestCode, String[] permissions, int[] grantResults) {
     super.onRequestPermissionsResult(requestCode, permissions, grantResults);
-    // 权限结果会自动传递给 Capacitor Bridge
   }
 }
