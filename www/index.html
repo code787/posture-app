@@ -2,82 +2,103 @@
 <html lang="zh-CN">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
   <title>坐姿检测</title>
   <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
     body {
-      margin: 0;
-      font-family: "Microsoft YaHei", sans-serif;
+      font-family: -apple-system, "Microsoft YaHei", sans-serif;
       background: #111;
       color: #eee;
       display: flex;
       flex-direction: column;
       align-items: center;
-      padding: 20px;
+      padding: 10px;
+      min-height: 100vh;
     }
-
-    h2 {
-      margin: 10px 0;
-    }
-
+    h2 { font-size: 18px; margin: 8px 0; }
     #container {
       position: relative;
-      width: 640px;
-      max-width: 100%;
-      height: 480px;
+      width: 100%;
+      max-width: 360px;
+      aspect-ratio: 3/4;
       background: #000;
       border-radius: 8px;
       overflow: hidden;
     }
-
     video, canvas {
-      position: absolute;
-      top: 0;
-      left: 0;
-      width: 100%;
-      height: 100%;
+      position: absolute; top: 0; left: 0;
+      width: 100%; height: 100%;
+      transform: scaleX(-1);
     }
-
     #postureBar {
-      margin-top: 15px;
-      padding: 10px 20px;
-      font-size: 18px;
+      margin-top: 8px;
+      padding: 8px 16px;
+      font-size: 16px;
       border-radius: 6px;
       text-align: center;
-      width: 600px;
-      max-width: 100%;
-      box-sizing: border-box;
+      width: 100%;
+      max-width: 360px;
     }
-
     .good { background: #2e7d32; }
     .warn { background: #f9a825; color: #000; }
     .bad  { background: #c62828; }
-
     #details {
-      margin-top: 15px;
-      font-size: 14px;
-      line-height: 1.8;
+      margin-top: 8px;
+      font-size: 12px;
+      line-height: 1.6;
       background: #222;
-      padding: 10px 20px;
+      padding: 8px 12px;
       border-radius: 6px;
-      width: 600px;
-      max-width: 100%;
-      box-sizing: border-box;
+      width: 100%;
+      max-width: 360px;
+      display: none;
     }
-
+    #details.show { display: block; }
+    .btn-row { display: flex; gap: 8px; margin-top: 8px; width: 100%; max-width: 360px; }
     button {
-      margin-top: 15px;
-      padding: 10px 25px;
-      font-size: 16px;
+      flex: 1;
+      padding: 10px 12px;
+      font-size: 14px;
       border: none;
       border-radius: 6px;
       background: #00d2ff;
       color: #000;
       cursor: pointer;
+      font-weight: bold;
     }
+    button.secondary { background: #444; color: #eee; }
+    button:active { opacity: 0.7; }
 
-    button:hover {
-      background: #00b8e6;
+    /* TTS 设置面板 */
+    #ttsPanel {
+      display: none;
+      width: 100%;
+      max-width: 360px;
+      background: #1a1a2e;
+      border-radius: 8px;
+      padding: 12px;
+      margin-top: 8px;
+    }
+    #ttsPanel.show { display: block; }
+    #ttsPanel h3 { font-size: 14px; margin-bottom: 8px; color: #00d2ff; }
+    .setting-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 8px;
+      font-size: 13px;
+    }
+    .setting-row label { flex: 1; }
+    .setting-row input[type="range"] { width: 120px; }
+    .setting-row select {
+      background: #333; color: #eee; border: 1px solid #555;
+      border-radius: 4px; padding: 4px 8px; font-size: 12px;
+    }
+    #ttsLog {
+      background: #000; color: #0f0; font-size: 11px;
+      padding: 6px; border-radius: 4px; margin-top: 6px;
+      max-height: 80px; overflow-y: auto; font-family: monospace;
     }
   </style>
 </head>
@@ -93,39 +114,197 @@
   <div id="postureBar" class="warn">点击开始检测</div>
 
   <div id="details">
-    俯仰角：<span id="pitchAngle">0</span>°<br>
-    面部朝下：<span id="faceDown">0</span><br>
-    鼻子与肩膀差值：<span id="noseShoulder">0</span><br>
-    歪头角度：<span id="tiltAngle">0</span>°<br>
-    躯干前倾角度：<span id="leanAngle">0</span>°<br>
-    不良持续时间：<span id="badDuration">0</span>秒
+    俯仰角：<span id="pitchAngle">0</span>° |
+    歪头：<span id="tiltAngle">0</span>° |
+    前倾：<span id="leanAngle">0</span>° |
+    面朝下：<span id="faceDown">0</span><br>
+    不良持续：<span id="badDuration">0</span>秒
   </div>
 
-  <button id="startBtn">开始检测</button>
+  <div class="btn-row">
+    <button id="startBtn">开始检测</button>
+    <button id="ttsBtn" class="secondary">语音设置</button>
+    <button id="detailBtn" class="secondary">详细</button>
+  </div>
 
-  <!-- MediaPipe 依赖 -->
+  <!-- TTS 设置面板 -->
+  <div id="ttsPanel">
+    <h3>语音提醒设置</h3>
+    <div class="setting-row">
+      <label>启用语音</label>
+      <input type="checkbox" id="ttsEnabled" checked>
+    </div>
+    <div class="setting-row">
+      <label>引擎</label>
+      <select id="ttsEngine">
+        <option value="auto">自动选择</option>
+        <option value="native">原生 TTS</option>
+        <option value="web">Web Speech</option>
+      </select>
+    </div>
+    <div class="setting-row">
+      <label>音量</label>
+      <input type="range" id="ttsVolume" min="0" max="100" value="100">
+      <span id="ttsVolumeVal">100</span>
+    </div>
+    <div class="setting-row">
+      <label>语速</label>
+      <input type="range" id="ttsRate" min="30" max="150" value="80">
+      <span id="ttsRateVal">0.8</span>
+    </div>
+    <div class="setting-row">
+      <button id="ttsTestBtn" style="flex:none;width:100%;">测试语音</button>
+    </div>
+    <div id="ttsLog"></div>
+  </div>
+
   <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/@mediapipe/pose/pose.js"></script>
 
-  <!-- 主逻辑 -->
   <script>
-       // ===== 页面元素 =====
+    // ===== 元素 =====
     var video = document.getElementById('video');
     var canvas = document.getElementById('canvas');
     var ctx = canvas.getContext('2d');
     var postureBar = document.getElementById('postureBar');
     var startBtn = document.getElementById('startBtn');
+    var ttsBtn = document.getElementById('ttsBtn');
+    var detailBtn = document.getElementById('detailBtn');
+    var ttsPanel = document.getElementById('ttsPanel');
+    var ttsLog = document.getElementById('ttsLog');
+    var details = document.getElementById('details');
+
+    // ===== TTS 配置 =====
+    var ttsConfig = {
+      enabled: true,
+      engine: 'auto',
+      volume: 1.0,
+      rate: 0.8
+    };
+
+    function log(msg) {
+      var line = document.createElement('div');
+      line.textContent = '[' + new Date().toLocaleTimeString() + '] ' + msg;
+      ttsLog.appendChild(line);
+      ttsLog.scrollTop = ttsLog.scrollHeight;
+      console.log('[TTS]', msg);
+    }
+
+    // 加载保存的设置
+    try {
+      var saved = JSON.parse(localStorage.getItem('ttsConfig'));
+      if (saved) { Object.assign(ttsConfig, saved); }
+    } catch(e) {}
+
+    function saveTTSConfig() {
+      localStorage.setItem('ttsConfig', JSON.stringify(ttsConfig));
+    }
+
+    // ===== TTS 引擎 =====
+    var nativeTTS = null;
+    var nativeReady = false;
+
+    async function initNativeTTS() {
+      log('尝试初始化原生 TTS...');
+      try {
+        if (window.Capacitor && window.Capacitor.registerPlugin) {
+          nativeTTS = window.Capacitor.registerPlugin('NativeTTS');
+          await nativeTTS.init();
+          nativeReady = true;
+          log('原生 TTS 初始化成功');
+          return;
+        }
+      } catch(e) {
+        log('原生 TTS 失败: ' + e.message);
+      }
+      log('原生 TTS 不可用，将使用 Web Speech');
+    }
+
+    async function speak(text) {
+      if (!ttsConfig.enabled) { log('语音已禁用'); return; }
+
+      log('播报: ' + text.substring(0, 30) + '...');
+
+      // 优先原生 TTS
+      if (ttsConfig.engine !== 'web' && nativeReady && nativeTTS) {
+        try {
+          await nativeTTS.speak({ text: text, rate: ttsConfig.rate, volume: ttsConfig.volume });
+          log('通过原生 TTS 播报成功');
+          return;
+        } catch(e) {
+          log('原生 TTS 播报失败: ' + e.message);
+        }
+      }
+
+      // Web Speech API
+      if (ttsConfig.engine !== 'native' && window.speechSynthesis) {
+        try {
+          speechSynthesis.cancel();
+          await new Promise(r => setTimeout(r, 50));
+          var utter = new SpeechSynthesisUtterance(text);
+          utter.lang = 'zh-CN';
+          utter.rate = ttsConfig.rate;
+          utter.volume = ttsConfig.volume;
+          utter.onerror = function(e) { log('Web Speech 错误: ' + e.error); };
+          utter.onend = function() { log('Web Speech 播报完成'); };
+          speechSynthesis.speak(utter);
+          log('通过 Web Speech 播报');
+          return;
+        } catch(e) {
+          log('Web Speech 失败: ' + e.message);
+        }
+      }
+
+      // 最后手段：震动提醒
+      if (navigator.vibrate) {
+        navigator.vibrate([200, 100, 200]);
+        log('使用震动提醒');
+      }
+      log('所有 TTS 引擎均不可用');
+    }
+
+    // ===== TTS UI 绑定 =====
+    document.getElementById('ttsEnabled').checked = ttsConfig.enabled;
+    document.getElementById('ttsEngine').value = ttsConfig.engine;
+    document.getElementById('ttsVolume').value = ttsConfig.volume * 100;
+    document.getElementById('ttsVolumeVal').textContent = Math.round(ttsConfig.volume * 100);
+    document.getElementById('ttsRate').value = ttsConfig.rate * 100;
+    document.getElementById('ttsRateVal').textContent = ttsConfig.rate;
+
+    document.getElementById('ttsEnabled').addEventListener('change', function() {
+      ttsConfig.enabled = this.checked; saveTTSConfig();
+    });
+    document.getElementById('ttsEngine').addEventListener('change', function() {
+      ttsConfig.engine = this.value; saveTTSConfig();
+    });
+    document.getElementById('ttsVolume').addEventListener('input', function() {
+      ttsConfig.volume = this.value / 100;
+      document.getElementById('ttsVolumeVal').textContent = this.value;
+      saveTTSConfig();
+    });
+    document.getElementById('ttsRate').addEventListener('input', function() {
+      ttsConfig.rate = this.value / 100;
+      document.getElementById('ttsRateVal').textContent = (this.value / 100).toFixed(1);
+      saveTTSConfig();
+    });
+
+    ttsBtn.addEventListener('click', function() {
+      ttsPanel.classList.toggle('show');
+    });
+    detailBtn.addEventListener('click', function() {
+      details.classList.toggle('show');
+    });
+    document.getElementById('ttsTestBtn').addEventListener('click', function() {
+      speak('你好，这是一条坐姿检测的语音测试。');
+    });
 
     // ===== 检测状态 =====
     var isRunning = false;
     var cameraInstance = null;
     var poseInstance = null;
 
-    // 初始化原生 TTS
-    initTTS();
-
-    // ===== 平滑与阈值 =====
+    // ===== 阈值 =====
     var SMOOTH_FACTOR = 0.3;
     var PITCH_THRESH = 20;
     var FACE_DOWN_THRESH = 0.4;
@@ -133,78 +312,15 @@
     var LEAN_THRESH = 25;
     var DELAY_THRESH = 3;
 
-    // ===== 平滑值 =====
-    var smoothPitch = 0;
-    var smoothTilt = 0;
-    var smoothLean = 0;
+    var smoothPitch = 0, smoothTilt = 0, smoothLean = 0;
+    var badStartTime = null, lastSpeakTime = 0;
+    var isCalibrating = false, calibrationFrames = [];
+    var CALIBRATION_DURATION = 5000, calibrationStartTime = 0, baseline = null;
 
-    // ===== 提醒控制 =====
-    var badStartTime = null;
-    var lastSpeakTime = 0;
-
-    // ===== 校准相关变量 =====
-    var isCalibrating = false;
-    var calibrationFrames = [];
-    var CALIBRATION_DURATION = 5000;
-    var calibrationStartTime = 0;
-    var baseline = null;
-
-// ===== 语音提醒 =====
-var nativeTTSReady = false;
-var NativeTTS = null;
-
-// 初始化原生 TTS
-async function initTTS() {
-  try {
-    // 手动注册原生 TTS 插件
-    if (window.Capacitor && window.Capacitor.registerPlugin) {
-      NativeTTS = window.Capacitor.registerPlugin('NativeTTS');
-      await NativeTTS.init();
-      nativeTTSReady = true;
-      console.log('Native TTS initialized');
-    } else if (window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.NativeTTS) {
-      NativeTTS = window.Capacitor.Plugins.NativeTTS;
-      await NativeTTS.init();
-      nativeTTSReady = true;
-      console.log('Native TTS initialized (via Plugins)');
-    }
-  } catch (e) {
-    console.warn('Native TTS init failed, will use Web Speech API:', e);
-  }
-}
-
-// 语音播报
-async function speak(text) {
-  console.log('TTS speak:', text);
-
-  // 优先使用原生 TTS
-  if (nativeTTSReady && NativeTTS) {
-    try {
-      await NativeTTS.speak({ text: text });
-      console.log('Spoke via Native TTS');
-      return;
-    } catch (e) {
-      console.warn('Native TTS speak failed:', e);
-    }
-  }
-
-  // 回退到 Web Speech API
-  if (window.speechSynthesis) {
-    speechSynthesis.cancel();
-    await new Promise(r => setTimeout(r, 50));
-    var utter = new SpeechSynthesisUtterance(text);
-    utter.lang = 'zh-CN';
-    utter.rate = 0.8;
-    utter.volume = 1;
-    speechSynthesis.speak(utter);
-    console.log('Spoke via Web Speech API');
-  }
-}
-   // ===== 开始检测 =====
+    // ===== 启动检测 =====
     startBtn.addEventListener('click', async function() {
       if (isRunning) return;
-
-      postureBar.textContent = '⏳ 正在启动摄像头...';
+      postureBar.textContent = '启动中...';
       postureBar.className = 'warn';
 
       if (!poseInstance) {
@@ -213,7 +329,6 @@ async function speak(text) {
             return 'https://cdn.jsdelivr.net/npm/@mediapipe/pose/' + file;
           }
         });
-
         poseInstance.setOptions({
           modelComplexity: 1,
           smoothLandmarks: true,
@@ -221,15 +336,12 @@ async function speak(text) {
           minDetectionConfidence: 0.5,
           minTrackingConfidence: 0.5
         });
-
         poseInstance.onResults(onResults);
       }
 
       cameraInstance = new Camera(video, {
-        onFrame: function() {
-          return poseInstance.send({ image: video });
-        },
-        width: 640,
+        onFrame: function() { return poseInstance.send({ image: video }); },
+        width: 360,
         height: 480
       });
 
@@ -240,46 +352,38 @@ async function speak(text) {
         calibrationFrames = [];
         calibrationStartTime = Date.now();
         baseline = null;
-        smoothPitch = 0;
-        smoothTilt = 0;
-        smoothLean = 0;
-      } catch (e) {
-        console.error('Camera start failed:', e);
-        postureBar.textContent = '❌ 无法启动摄像头，请检查权限';
+        smoothPitch = 0; smoothTilt = 0; smoothLean = 0;
+        startBtn.textContent = '检测中';
+        startBtn.disabled = true;
+      } catch(e) {
+        postureBar.textContent = '摄像头启动失败';
         postureBar.className = 'bad';
-        alert('摄像头启动失败。\n\n请前往：\n设置 → 应用管理 → 坐姿检测 → 权限\n开启摄像头和麦克风权限后重启应用');
+        log('摄像头错误: ' + e.message);
       }
     });
 
-    // ===== 核心检测逻辑 =====
+    // ===== 检测逻辑 =====
     function onResults(results) {
       if (!isRunning) return;
-
-      canvas.width = video.videoWidth || 640;
+      canvas.width = video.videoWidth || 360;
       canvas.height = video.videoHeight || 480;
       ctx.clearRect(0, 0, canvas.width, canvas.height);
 
       if (!results.poseLandmarks) {
-        postureBar.textContent = '⚠️ 未检测到人，请调整位置';
+        postureBar.textContent = '未检测到人，请调整位置';
         postureBar.className = 'warn';
         return;
       }
 
       var lm = results.poseLandmarks;
-
-      // 绘制骨架
       if (window.drawConnectors && window.POSE_CONNECTIONS) {
         drawConnectors(ctx, lm, POSE_CONNECTIONS, { color: '#00d2ff', lineWidth: 2 });
         drawLandmarks(ctx, lm, { color: '#ff0066', lineWidth: 1, radius: 3 });
       }
 
-      var nose = lm[0];
-      var leftEye = lm[5];
-      var rightEye = lm[2];
-      var leftShoulder = lm[11];
-      var rightShoulder = lm[12];
-      var leftHip = lm[23];
-      var rightHip = lm[24];
+      var nose = lm[0], leftEye = lm[5], rightEye = lm[2];
+      var leftShoulder = lm[11], rightShoulder = lm[12];
+      var leftHip = lm[23], rightHip = lm[24];
 
       var shoulderMidX = (leftShoulder.x + rightShoulder.x) / 2;
       var shoulderMidY = (leftShoulder.y + rightShoulder.y) / 2;
@@ -288,14 +392,11 @@ async function speak(text) {
       var hipMidY = (leftHip.y + rightHip.y) / 2;
       var shoulderWidth = Math.abs(leftShoulder.x - rightShoulder.x);
 
-      // ===== 计算当前帧原始值 =====
       var noseShoulderDiff = shoulderMidY - nose.y;
       var normalizedNoseDrop = shoulderWidth > 0.01 ? noseShoulderDiff / shoulderWidth : 0;
-
       var eyeShoulderDiff = shoulderMidY - eyeMidY;
       var normalizedEyeDrop = shoulderWidth > 0.01 ? eyeShoulderDiff / shoulderWidth : 0;
 
-      // 计算鼻子到肩膀中点的距离（归一化）
       var noseToShoulderDist = Math.sqrt(
         Math.pow(nose.x - shoulderMidX, 2) + Math.pow(nose.y - shoulderMidY, 2)
       );
@@ -309,29 +410,18 @@ async function speak(text) {
       var torsoDy = nose.y - hipMidY;
       var currentLean = Math.abs(Math.atan2(torsoDx, torsoDy) * (180 / Math.PI));
 
-      // ===== 校准阶段 =====
       if (isCalibrating) {
         calibrationFrames.push({
-          noseDrop: normalizedNoseDrop,
-          eyeDrop: normalizedEyeDrop,
-          tilt: currentTilt,
-          lean: currentLean,
-          noseDist: normalizedNoseDist
+          noseDrop: normalizedNoseDrop, eyeDrop: normalizedEyeDrop,
+          tilt: currentTilt, lean: currentLean, noseDist: normalizedNoseDist
         });
-
         var elapsed = Date.now() - calibrationStartTime;
         var remaining = Math.ceil((CALIBRATION_DURATION - elapsed) / 1000);
-
-        postureBar.textContent = '📐 请保持正常坐姿，校准中... ' + remaining + '秒';
+        postureBar.textContent = '校准中... ' + remaining + '秒，请保持正常坐姿';
         postureBar.className = 'warn';
-
         if (elapsed >= CALIBRATION_DURATION) {
-          calibrationFrames.sort(function(a, b) {
-            return a.noseDrop - b.noseDrop;
-          });
-
+          calibrationFrames.sort(function(a, b) { return a.noseDrop - b.noseDrop; });
           var midIdx = Math.floor(calibrationFrames.length / 2);
-
           baseline = {
             noseDrop: calibrationFrames[midIdx].noseDrop,
             eyeDrop: calibrationFrames[midIdx].eyeDrop,
@@ -339,35 +429,21 @@ async function speak(text) {
             lean: calibrationFrames[midIdx].lean,
             noseDist: calibrationFrames[midIdx].noseDist
           };
-
           isCalibrating = false;
           calibrationFrames = [];
-
-          smoothPitch = 0;
-          smoothTilt = 0;
-          smoothLean = 0;
-
-          postureBar.textContent = '✅ 校准完成！坐姿良好，继续保持！';
+          smoothPitch = 0; smoothTilt = 0; smoothLean = 0;
+          postureBar.textContent = '校准完成！继续保持';
           postureBar.className = 'good';
         }
         return;
       }
 
-      // ===== 未校准时不检测 =====
       if (!baseline) return;
 
-      // ===== 基于基准值计算偏差 =====
-
-      // 垂直方向偏差（检测抬头）
       var pitchDeltaVertical = normalizedNoseDrop - baseline.noseDrop;
-
-      // 距离偏差（检测低头）：低头时鼻子靠近肩膀，距离变小，差值为负
       var distDelta = normalizedNoseDist - baseline.noseDist;
       var pitchDeltaDown = Math.max(0, -distDelta * 300);
-
-      // 综合：抬头用垂直偏差，低头用距离偏差
       var rawPitch = Math.min(90, Math.max(0, pitchDeltaVertical * 150 + pitchDeltaDown));
-
       smoothPitch = smoothPitch * (1 - SMOOTH_FACTOR) + rawPitch * SMOOTH_FACTOR;
 
       var faceDelta = normalizedEyeDrop - baseline.eyeDrop;
@@ -381,66 +457,53 @@ async function speak(text) {
       var rawLean = Math.max(0, leanDelta);
       smoothLean = smoothLean * (1 - SMOOTH_FACTOR) + rawLean * SMOOTH_FACTOR;
 
-      // ===== 综合判断 =====
       var pitchBad = smoothPitch > PITCH_THRESH;
       var faceBad = faceDownScore > FACE_DOWN_THRESH;
       var tiltBad = smoothTilt > TILT_THRESH;
       var leanBad = smoothLean > LEAN_THRESH;
-
       var isBadPosture = pitchBad || faceBad || tiltBad || leanBad;
 
-      // 更新详情面板
       document.getElementById('pitchAngle').textContent = smoothPitch.toFixed(1);
       document.getElementById('faceDown').textContent = faceDownScore.toFixed(2);
-      document.getElementById('noseShoulder').textContent = noseShoulderDiff.toFixed(3);
       document.getElementById('tiltAngle').textContent = smoothTilt.toFixed(1);
       document.getElementById('leanAngle').textContent = smoothLean.toFixed(1);
 
-      // ===== 状态显示与提醒 =====
       if (isBadPosture) {
         if (!badStartTime) badStartTime = Date.now();
-
         var badDuration = (Date.now() - badStartTime) / 1000;
         document.getElementById('badDuration').textContent = badDuration.toFixed(1);
-
         if (badDuration >= DELAY_THRESH) {
-          postureBar.textContent = '❌ 坐姿不良！请挺直背部、抬高头部';
+          postureBar.textContent = '坐姿不良！请调整';
           postureBar.className = 'bad';
-
           var now = Date.now();
           if (now - lastSpeakTime > 10000) {
             lastSpeakTime = now;
-
             var msg = '';
-            if (pitchBad) msg = '请注意，你正在低头或抬头，请保持头部端正。';
-            else if (faceBad) msg = '面部过于朝下，请调整坐姿。';
-
-            if (tiltBad) msg += ' 注意不要歪头。';
-            if (leanBad) msg += ' 请挺直背部，不要趴在桌上。';
-
+            if (pitchBad) msg = '请注意头部位置。';
+            else if (faceBad) msg = '面部过于朝下。';
+            if (tiltBad) msg += '不要歪头。';
+            if (leanBad) msg += '请挺直背部。';
             speak(msg || '请注意坐姿。');
           }
         } else {
-          postureBar.textContent = '⚠️ 坐姿异常，请调整（' + (DELAY_THRESH - badDuration).toFixed(0) + '秒后提醒）';
+          postureBar.textContent = '坐姿异常，请调整（' + (DELAY_THRESH - badDuration).toFixed(0) + '秒后提醒）';
           postureBar.className = 'warn';
         }
       } else {
         badStartTime = null;
         document.getElementById('badDuration').textContent = '0';
-        postureBar.textContent = '✅ 坐姿良好，继续保持！';
+        postureBar.textContent = '坐姿良好，继续保持';
         postureBar.className = 'good';
       }
     }
 
-    // ===== 页面关闭时清理 =====
+    // ===== 初始化 =====
+    initNativeTTS();
+
     window.addEventListener('beforeunload', function() {
       if (cameraInstance) cameraInstance.stop();
-      if (window.Capacitor && window.Capacitor.Plugins.NativeTTS) {
-        window.Capacitor.Plugins.NativeTTS.stop();
-      }
       if (window.speechSynthesis) speechSynthesis.cancel();
     });
   </script>
 </body>
 </html>
-
