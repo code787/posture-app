@@ -151,26 +151,25 @@
 
 // ===== 语音提醒 =====
 var nativeTTSReady = false;
+var NativeTTS = null;
 
 // 初始化原生 TTS
 async function initTTS() {
-  if (window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.NativeTTS) {
-    try {
-      await window.Capacitor.Plugins.NativeTTS.init();
+  try {
+    // 手动注册原生 TTS 插件
+    if (window.Capacitor && window.Capacitor.registerPlugin) {
+      NativeTTS = window.Capacitor.registerPlugin('NativeTTS');
+      await NativeTTS.init();
       nativeTTSReady = true;
       console.log('Native TTS initialized');
-    } catch (e) {
-      console.warn('Native TTS init failed:', e);
+    } else if (window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.NativeTTS) {
+      NativeTTS = window.Capacitor.Plugins.NativeTTS;
+      await NativeTTS.init();
+      nativeTTSReady = true;
+      console.log('Native TTS initialized (via Plugins)');
     }
-  }
-}
-
-// 停止当前播放
-async function stopTTS() {
-  if (nativeTTSReady && window.Capacitor.Plugins.NativeTTS) {
-    await window.Capacitor.Plugins.NativeTTS.stop();
-  } else if (window.speechSynthesis) {
-    speechSynthesis.cancel();
+  } catch (e) {
+    console.warn('Native TTS init failed, will use Web Speech API:', e);
   }
 }
 
@@ -179,9 +178,9 @@ async function speak(text) {
   console.log('TTS speak:', text);
 
   // 优先使用原生 TTS
-  if (nativeTTSReady && window.Capacitor.Plugins.NativeTTS) {
+  if (nativeTTSReady && NativeTTS) {
     try {
-      await window.Capacitor.Plugins.NativeTTS.speak({ text: text });
+      await NativeTTS.speak({ text: text });
       console.log('Spoke via Native TTS');
       return;
     } catch (e) {

@@ -25,6 +25,21 @@ jobs:
       - name: Sync web assets
         run: npx cap sync android
 
+      - name: Restore NativeTTS plugin registration
+        run: |
+          cat > android/app/src/main/assets/capacitor.plugins.json << 'EOF'
+          [
+            {
+              "pkg": "@capacitor/camera",
+              "classpath": "com.capacitorjs.plugins.camera.CameraPlugin"
+            },
+            {
+              "pkg": "native-tts",
+              "classpath": "com.example.posture.plugins.NativeTTSPlugin"
+            }
+          ]
+          EOF
+
       - name: Setup Java
         uses: actions/setup-java@v4
         with:
