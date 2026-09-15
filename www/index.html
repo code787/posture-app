@@ -122,6 +122,9 @@
     var cameraInstance = null;
     var poseInstance = null;
 
+    // 初始化原生 TTS
+    initTTS();
+
     // ===== 平滑与阈值 =====
     var SMOOTH_FACTOR = 0.3;
     var PITCH_THRESH = 20;
@@ -146,86 +149,57 @@
     var calibrationStartTime = 0;
     var baseline = null;
 
-// ===== 语音提醒=====
-var voicesLoaded = false;
-var voices = [];
+// ===== 语音提醒 =====
+var nativeTTSReady = false;
 
-// 加载语音列表
-function loadVoices() {
-  voices = speechSynthesis.getVoices();
-  if (voices.length > 0) {
-    voicesLoaded = true;
+// 初始化原生 TTS
+async function initTTS() {
+  if (window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.NativeTTS) {
+    try {
+      await window.Capacitor.Plugins.NativeTTS.init();
+      nativeTTSReady = true;
+      console.log('Native TTS initialized');
+    } catch (e) {
+      console.warn('Native TTS init failed:', e);
+    }
   }
 }
 
-// 部分浏览器异步加载语音，需要监听事件
-if (window.speechSynthesis) {
-  loadVoices();
-  speechSynthesis.onvoiceschanged = loadVoices;
+// 停止当前播放
+async function stopTTS() {
+  if (nativeTTSReady && window.Capacitor.Plugins.NativeTTS) {
+    await window.Capacitor.Plugins.NativeTTS.stop();
+  } else if (window.speechSynthesis) {
+    speechSynthesis.cancel();
+  }
 }
 
-// 确保语音系统就绪后再允许说话
-function ensureSpeechReady() {
-  if (!window.speechSynthesis) return false;
-  if (voicesLoaded) return true;
-  // 等待语音列表加载
-  return new Promise(resolve => {
-    const check = () => {
-      if (voicesLoaded) {
-        resolve(true);
-      } else {
-        setTimeout(check, 100);
-      }
-    };
-    check();
-  });
-}
-
+// 语音播报
 async function speak(text) {
-  if (!window.speechSynthesis) return;
+  console.log('TTS speak:', text);
 
-  // 确保语音系统就绪
-  await ensureSpeechReady();
+  // 优先使用原生 TTS
+  if (nativeTTSReady && window.Capacitor.Plugins.NativeTTS) {
+    try {
+      await window.Capacitor.Plugins.NativeTTS.speak({ text: text });
+      console.log('Spoke via Native TTS');
+      return;
+    } catch (e) {
+      console.warn('Native TTS speak failed:', e);
+    }
+  }
 
-  // 先清空队列，防止堆积
-  speechSynthesis.cancel();
-
-  // 等待队列清空
-  await new Promise(resolve => setTimeout(resolve, 50));
-
-  setTimeout(function() {
+  // 回退到 Web Speech API
+  if (window.speechSynthesis) {
+    speechSynthesis.cancel();
+    await new Promise(r => setTimeout(r, 50));
     var utter = new SpeechSynthesisUtterance(text);
     utter.lang = 'zh-CN';
     utter.rate = 0.8;
     utter.volume = 1;
-
-    // 优先选择中文语音
-    if (voicesLoaded && voices.length > 0) {
-      var zhVoice = voices.find(function(v) {
-        return v.lang.indexOf('zh') !== -1;
-      });
-      if (zhVoice) {
-        utter.voice = zhVoice;
-      } else {
-        // 如果没有找到中文语音，使用第一个可用语音
-        if (voices.length > 0) {
-          utter.voice = voices[0];
-        }
-      }
-    }
-
-    // 显示调试信息
-    console.log('Speaking:', text, 'Voice:', utter.voice ? utter.voice.name : 'default');
-
     speechSynthesis.speak(utter);
-
-    // 3秒后检查是否仍在合成（如果还在则说明可能有问题）
-    setTimeout(function() {
-      if (speechSynthesis.speaking) {
-        console.warn('Speech still playing after 3s - possible issue');
-      }
-    }, 3000);
-  }, 150);
+    console.log('Spoke via Web Speech API');
+  }
 }
    // ===== 请求摄像头权限 =====
     async function requestCameraPermission() {
@@ -517,7 +491,10 @@ async function speak(text) {
     // ===== 页面关闭时清理 =====
     window.addEventListener('beforeunload', function() {
       if (cameraInstance) cameraInstance.stop();
-      speechSynthesis.cancel();
+      if (window.Capacitor && window.Capacitor.Plugins.NativeTTS) {
+        window.Capacitor.Plugins.NativeTTS.stop();
+      }
+      if (window.speechSynthesis) speechSynthesis.cancel();
     });
   </script>
 </body>

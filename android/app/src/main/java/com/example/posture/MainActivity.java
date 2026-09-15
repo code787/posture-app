@@ -7,17 +7,20 @@ import androidx.core.app.ActivityCompat;
 import androidx.core.content.ContextCompat;
 import com.getcapacitor.BridgeActivity;
 import com.capacitorjs.plugins.camera.CameraPlugin;
+import com.example.posture.plugins.NativeTTSPlugin;
 
 public class MainActivity extends BridgeActivity {
   
   private static final int CAMERA_PERMISSION_REQUEST = 100;
+  private NativeTTSPlugin ttsPlugin;
   
   @Override
   public void onCreate(Bundle savedInstanceState) {
     registerPlugin(CameraPlugin.class);
+    registerPlugin(NativeTTSPlugin.class);
     super.onCreate(savedInstanceState);
     
-    // 启动时立即请求摄像头权限
+    // 请求摄像头权限
     requestCameraPermission();
   }
   
@@ -33,5 +36,10 @@ public class MainActivity extends BridgeActivity {
   @Override
   public void onRequestPermissionsResult(int requestCode, String[] permissions, int[] grantResults) {
     super.onRequestPermissionsResult(requestCode, permissions, grantResults);
+  }
+  
+  @Override
+  protected void onDestroy() {
+    super.onDestroy();
   }
 }
