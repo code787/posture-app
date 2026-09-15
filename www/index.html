@@ -201,73 +201,12 @@ async function speak(text) {
     console.log('Spoke via Web Speech API');
   }
 }
-   // ===== 请求摄像头权限 =====
-    async function requestCameraPermission() {
-      postureBar.textContent = '🔐 正在请求摄像头权限...';
-      postureBar.className = 'warn';
-
-      // 如果是在 Capacitor WebView 中
-      if (window.Capacitor) {
-        console.log('Running in Capacitor environment');
-        
-        // 方法1: 使用 Capacitor Camera 插件
-        if (window.Capacitor.Plugins && window.Capacitor.Plugins.Camera) {
-          try {
-            console.log('Requesting permission via Capacitor Camera plugin');
-            var status = await window.Capacitor.Plugins.Camera.requestPermissions();
-            console.log('Camera permission status:', status);
-            if (status.camera === 'granted') return true;
-          } catch (e) {
-            console.warn('Capacitor Camera plugin failed:', e);
-          }
-        }
-
-        // 方法2: 直接调用原生 Android 权限请求
-        try {
-          console.log('Trying native permission request');
-          var result = await window.Capacitor.Plugins.Permissions.requestPermissions(
-            { permissions: ['android.permission.CAMERA'] }
-          );
-          console.log('Native permission result:', result);
-          if (result['android.permission.CAMERA'] === 'granted') return true;
-        } catch (e) {
-          console.warn('Native permission request failed:', e);
-        }
-      }
-
-      // 回退到标准 Web API
-      try {
-        console.log('Trying Web API getUserMedia');
-        var stream = await navigator.mediaDevices.getUserMedia({ 
-          video: { 
-            facingMode: 'user',
-            width: { ideal: 640 },
-            height: { ideal: 480 }
-          } 
-        });
-        stream.getTracks().forEach(function(track) { track.stop(); });
-        console.log('Web API permission granted');
-        return true;
-      } catch (e) {
-        console.error('Camera permission denied:', e);
-        postureBar.textContent = '❌ 摄像头权限被拒绝，请手动开启';
-        postureBar.className = 'bad';
-        alert('无法获取摄像头权限。\n\n请前往：\n设置 → 应用管理 → 坐姿检测 → 权限\n开启摄像头权限后重试');
-        return false;
-      }
-    }
-
-    // ===== 开始检测 =====
+   // ===== 开始检测 =====
     startBtn.addEventListener('click', async function() {
       if (isRunning) return;
 
-      // 先请求摄像头权限
-      var hasPermission = await requestCameraPermission();
-      if (!hasPermission) {
-        postureBar.textContent = '❌ 摄像头权限被拒绝';
-        postureBar.className = 'bad';
-        return;
-      }
+      postureBar.textContent = '⏳ 正在启动摄像头...';
+      postureBar.className = 'warn';
 
       if (!poseInstance) {
         poseInstance = new Pose({
@@ -295,16 +234,22 @@ async function speak(text) {
         height: 480
       });
 
-      cameraInstance.start();
-
-      isRunning = true;
-      isCalibrating = true;
-      calibrationFrames = [];
-      calibrationStartTime = Date.now();
-      baseline = null;
-      smoothPitch = 0;
-      smoothTilt = 0;
-      smoothLean = 0;
+      try {
+        await cameraInstance.start();
+        isRunning = true;
+        isCalibrating = true;
+        calibrationFrames = [];
+        calibrationStartTime = Date.now();
+        baseline = null;
+        smoothPitch = 0;
+        smoothTilt = 0;
+        smoothLean = 0;
+      } catch (e) {
+        console.error('Camera start failed:', e);
+        postureBar.textContent = '❌ 无法启动摄像头，请检查权限';
+        postureBar.className = 'bad';
+        alert('摄像头启动失败。\n\n请前往：\n设置 → 应用管理 → 坐姿检测 → 权限\n开启摄像头和麦克风权限后重启应用');
+      }
     });
 
     // ===== 核心检测逻辑 =====
