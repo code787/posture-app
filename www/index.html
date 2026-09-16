@@ -196,36 +196,41 @@
     // ===== TTS 引擎 =====
     var ttsReady = false;
 
-    function checkTTSSupport() {
-      if (window.NativeTTS && window.NativeTTS.isReady()) {
+    function initTTS() {
+      // 尝试 Android JavaScriptInterface
+      if (window.Android && window.Android.isReady && window.Android.isReady()) {
         ttsReady = true;
-        log('原生 TTS 已就绪 (JavaScriptInterface)');
+        log('Android Native TTS 就绪');
         return;
       }
+      // 尝试 Web Speech
       if (window.speechSynthesis) {
         ttsReady = true;
         log('Web Speech API 可用');
         return;
       }
-      if (navigator.vibrate) {
-        log('仅震动可用');
-      } else {
-        log('无可用 TTS');
-      }
+      log('等待 TTS 初始化...');
+      // 延迟重试
+      setTimeout(function() {
+        if (window.Android && window.Android.isReady && window.Android.isReady()) {
+          ttsReady = true;
+          log('Android Native TTS 延迟就绪');
+        }
+      }, 2000);
     }
 
     async function speak(text) {
       if (!ttsConfig.enabled) return;
       log('播报: ' + text.substring(0, 20));
 
-      // 方法1: 原生 JavaScriptInterface TTS (最可靠)
-      if (window.NativeTTS && window.NativeTTS.isReady && window.NativeTTS.isReady()) {
+      // 方法1: Android JavaScriptInterface
+      if (window.Android && window.Android.isReady && window.Android.isReady()) {
         try {
-          window.NativeTTS.speak(text, ttsConfig.rate, ttsConfig.volume);
-          log('原生 TTS 播报成功');
+          window.Android.speak(text, ttsConfig.rate);
+          log('Native TTS OK');
           return;
         } catch(e) {
-          log('原生 TTS 失败: ' + e.message);
+          log('Native TTS 失败: ' + e);
         }
       }
 
@@ -239,10 +244,10 @@
           utter.rate = ttsConfig.rate;
           utter.volume = ttsConfig.volume;
           speechSynthesis.speak(utter);
-          log('Web Speech 播报');
+          log('Web Speech OK');
           return;
         } catch(e) {
-          log('Web Speech 失败: ' + e.message);
+          log('Web Speech 失败: ' + e);
         }
       }
 
@@ -483,13 +488,9 @@
     }
 
     // ===== 初始化 =====
-    checkTTSSupport();
-
-    // 监听原生 TTS 就绪事件
-    window.addEventListener('load', function() {
-      setTimeout(checkTTSSupport, 1000);
-      setTimeout(checkTTSSupport, 3000);
-    });
+    initTTS();
+    setTimeout(initTTS, 1000);
+    setTimeout(initTTS, 3000);
 
     window.addEventListener('beforeunload', function() {
       if (cameraInstance) cameraInstance.stop();
