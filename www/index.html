@@ -135,14 +135,6 @@
       <input type="checkbox" id="ttsEnabled" checked>
     </div>
     <div class="setting-row">
-      <label>引擎</label>
-      <select id="ttsEngine">
-        <option value="auto">自动选择</option>
-        <option value="native">原生 TTS</option>
-        <option value="web">Web Speech</option>
-      </select>
-    </div>
-    <div class="setting-row">
       <label>音量</label>
       <input type="range" id="ttsVolume" min="0" max="100" value="100">
       <span id="ttsVolumeVal">100</span>
@@ -202,43 +194,43 @@
     }
 
     // ===== TTS 引擎 =====
-    var nativeTTS = null;
-    var nativeReady = false;
+    var ttsReady = false;
 
-    async function initNativeTTS() {
-      log('尝试初始化原生 TTS...');
-      try {
-        if (window.Capacitor && window.Capacitor.registerPlugin) {
-          nativeTTS = window.Capacitor.registerPlugin('NativeTTS');
-          await nativeTTS.init();
-          nativeReady = true;
-          log('原生 TTS 初始化成功');
-          return;
-        }
-      } catch(e) {
-        log('原生 TTS 失败: ' + e.message);
+    function checkTTSSupport() {
+      if (window.NativeTTS && window.NativeTTS.isReady()) {
+        ttsReady = true;
+        log('原生 TTS 已就绪 (JavaScriptInterface)');
+        return;
       }
-      log('原生 TTS 不可用，将使用 Web Speech');
+      if (window.speechSynthesis) {
+        ttsReady = true;
+        log('Web Speech API 可用');
+        return;
+      }
+      if (navigator.vibrate) {
+        log('仅震动可用');
+      } else {
+        log('无可用 TTS');
+      }
     }
 
     async function speak(text) {
-      if (!ttsConfig.enabled) { log('语音已禁用'); return; }
+      if (!ttsConfig.enabled) return;
+      log('播报: ' + text.substring(0, 20));
 
-      log('播报: ' + text.substring(0, 30) + '...');
-
-      // 优先原生 TTS
-      if (ttsConfig.engine !== 'web' && nativeReady && nativeTTS) {
+      // 方法1: 原生 JavaScriptInterface TTS (最可靠)
+      if (window.NativeTTS && window.NativeTTS.isReady && window.NativeTTS.isReady()) {
         try {
-          await nativeTTS.speak({ text: text, rate: ttsConfig.rate, volume: ttsConfig.volume });
-          log('通过原生 TTS 播报成功');
+          window.NativeTTS.speak(text, ttsConfig.rate, ttsConfig.volume);
+          log('原生 TTS 播报成功');
           return;
         } catch(e) {
-          log('原生 TTS 播报失败: ' + e.message);
+          log('原生 TTS 失败: ' + e.message);
         }
       }
 
-      // Web Speech API
-      if (ttsConfig.engine !== 'native' && window.speechSynthesis) {
+      // 方法2: Web Speech API
+      if (window.speechSynthesis) {
         try {
           speechSynthesis.cancel();
           await new Promise(r => setTimeout(r, 50));
@@ -246,27 +238,23 @@
           utter.lang = 'zh-CN';
           utter.rate = ttsConfig.rate;
           utter.volume = ttsConfig.volume;
-          utter.onerror = function(e) { log('Web Speech 错误: ' + e.error); };
-          utter.onend = function() { log('Web Speech 播报完成'); };
           speechSynthesis.speak(utter);
-          log('通过 Web Speech 播报');
+          log('Web Speech 播报');
           return;
         } catch(e) {
           log('Web Speech 失败: ' + e.message);
         }
       }
 
-      // 最后手段：震动提醒
+      // 方法3: 震动
       if (navigator.vibrate) {
-        navigator.vibrate([200, 100, 200]);
-        log('使用震动提醒');
+        navigator.vibrate([300, 100, 300, 100, 300]);
+        log('震动提醒');
       }
-      log('所有 TTS 引擎均不可用');
     }
 
     // ===== TTS UI 绑定 =====
     document.getElementById('ttsEnabled').checked = ttsConfig.enabled;
-    document.getElementById('ttsEngine').value = ttsConfig.engine;
     document.getElementById('ttsVolume').value = ttsConfig.volume * 100;
     document.getElementById('ttsVolumeVal').textContent = Math.round(ttsConfig.volume * 100);
     document.getElementById('ttsRate').value = ttsConfig.rate * 100;
@@ -274,9 +262,6 @@
 
     document.getElementById('ttsEnabled').addEventListener('change', function() {
       ttsConfig.enabled = this.checked; saveTTSConfig();
-    });
-    document.getElementById('ttsEngine').addEventListener('change', function() {
-      ttsConfig.engine = this.value; saveTTSConfig();
     });
     document.getElementById('ttsVolume').addEventListener('input', function() {
       ttsConfig.volume = this.value / 100;
@@ -296,7 +281,7 @@
       details.classList.toggle('show');
     });
     document.getElementById('ttsTestBtn').addEventListener('click', function() {
-      speak('你好，这是一条坐姿检测的语音测试。');
+      speak('你好，坐姿检测语音测试。');
     });
 
     // ===== 检测状态 =====
@@ -498,7 +483,13 @@
     }
 
     // ===== 初始化 =====
-    initNativeTTS();
+    checkTTSSupport();
+
+    // 监听原生 TTS 就绪事件
+    window.addEventListener('load', function() {
+      setTimeout(checkTTSSupport, 1000);
+      setTimeout(checkTTSSupport, 3000);
+    });
 
     window.addEventListener('beforeunload', function() {
       if (cameraInstance) cameraInstance.stop();
