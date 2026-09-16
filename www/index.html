@@ -148,6 +148,9 @@
       <button id="ttsTestBtn" style="flex:none;width:100%;">测试语音</button>
     </div>
     <div id="ttsLog"></div>
+    <div class="setting-row">
+      <button id="ttsDebugBtn" style="flex:none;width:100%;background:#666;color:#fff;font-size:11px;">调试诊断</button>
+    </div>
   </div>
 
   <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js"></script>
@@ -287,6 +290,19 @@
     });
     document.getElementById('ttsTestBtn').addEventListener('click', function() {
       speak('你好，坐姿检测语音测试。');
+    });
+    document.getElementById('ttsDebugBtn').addEventListener('click', function() {
+      var info = '';
+      if (window.Android && window.Android.debug) {
+        info = window.Android.debug();
+      } else {
+        info = 'Android接口不可用 | speechSynthesis=' + !!window.speechSynthesis;
+        if (window.speechSynthesis) {
+          info += ' | voices=' + (speechSynthesis.getVoices() || []).length;
+        }
+      }
+      log('诊断: ' + info);
+      alert(info);
     });
 
     // ===== 检测状态 =====
