@@ -82,6 +82,14 @@
     }
     #ttsPanel.show { display: block; }
     #ttsPanel h3 { font-size: 14px; margin-bottom: 8px; color: #00d2ff; }
+    #ttsStatus {
+      font-size: 12px;
+      color: #8fd3ff;
+      background: #10202e;
+      border-radius: 4px;
+      padding: 6px 8px;
+      margin-bottom: 8px;
+    }
     .setting-row {
       display: flex;
       justify-content: space-between;
@@ -130,6 +138,7 @@
   <!-- TTS 设置面板 -->
   <div id="ttsPanel">
     <h3>语音提醒设置</h3>
+    <div id="ttsStatus">语音初始化中...</div>
     <div class="setting-row">
       <label>启用语音</label>
       <input type="checkbox" id="ttsEnabled" checked>
@@ -173,9 +182,16 @@
     // ===== TTS 配置 =====
     var ttsConfig = {
       enabled: true,
-      engine: 'auto',
       volume: 1.0,
       rate: 0.8
+    };
+
+    var ttsState = {
+      ready: false,
+      failed: false,
+      reason: '',
+      language: '',
+      plugin: null
     };
 
     function log(msg) {
@@ -196,69 +212,114 @@
       localStorage.setItem('ttsConfig', JSON.stringify(ttsConfig));
     }
 
-    // ===== TTS 引擎 =====
-    var ttsReady = false;
-
-    function initTTS() {
-      // 尝试 Android JavaScriptInterface
-      if (window.Android && window.Android.isReady && window.Android.isReady()) {
-        ttsReady = true;
-        log('Android Native TTS 就绪');
-        return;
-      }
-      // 尝试 Web Speech
-      if (window.speechSynthesis) {
-        ttsReady = true;
-        log('Web Speech API 可用');
-        return;
-      }
-      log('等待 TTS 初始化...');
-      // 延迟重试
-      setTimeout(function() {
-        if (window.Android && window.Android.isReady && window.Android.isReady()) {
-          ttsReady = true;
-          log('Android Native TTS 延迟就绪');
+    // ===== TTS 引擎（Capacitor 插件，代替原来的 window.Android 接口）=====
+    function getTTSPlugin() {
+      if (ttsState.plugin) return ttsState.plugin;
+      if (window.Capacitor) {
+        if (typeof Capacitor.registerPlugin === 'function') {
+          ttsState.plugin = Capacitor.registerPlugin('NativeTTS');
+        } else if (Capacitor.Plugins) {
+          ttsState.plugin = Capacitor.Plugins.NativeTTS || null;
         }
-      }, 2000);
+      }
+      return ttsState.plugin;
     }
 
-    async function speak(text) {
-      if (!ttsConfig.enabled) return;
-      log('播报: ' + text.substring(0, 20));
+    function reasonText(reason) {
+      var map = {
+        missing_chinese_voice: '缺少中文语音包，已使用系统默认语言',
+        no_voice_data: '系统没有可用的语音数据，请安装 TTS 引擎（如 Google 语音服务）',
+        tts_unavailable: 'TTS 引擎不可用',
+        no_plugin: '原生语音插件未加载'
+      };
+      if (reason && reason.indexOf('tts_init_failed') === 0) {
+        return 'TTS 引擎初始化失败（' + reason + '）';
+      }
+      return map[reason] || reason || '未知原因';
+    }
 
-      // 方法1: Android JavaScriptInterface
-      if (window.Android && window.Android.isReady && window.Android.isReady()) {
-        try {
-          window.Android.speak(text, ttsConfig.rate);
-          log('Native TTS OK');
-          return;
-        } catch(e) {
-          log('Native TTS 失败: ' + e);
-        }
+    function updateTTSStatus(text) {
+      var el = document.getElementById('ttsStatus');
+      if (el) el.textContent = text;
+    }
+
+    function initTTS(attempt) {
+      attempt = attempt || 0;
+      var plugin = getTTSPlugin();
+
+      if (!plugin) {
+        ttsState.failed = true;
+        ttsState.reason = 'no_plugin';
+        updateTTSStatus('语音不可用：原生插件未加载');
+        log('原生语音插件不可用');
+        return;
       }
 
-      // 方法2: Web Speech API
-      if (window.speechSynthesis) {
-        try {
-          speechSynthesis.cancel();
-          await new Promise(r => setTimeout(r, 50));
-          var utter = new SpeechSynthesisUtterance(text);
-          utter.lang = 'zh-CN';
-          utter.rate = ttsConfig.rate;
-          utter.volume = ttsConfig.volume;
-          speechSynthesis.speak(utter);
-          log('Web Speech OK');
-          return;
-        } catch(e) {
-          log('Web Speech 失败: ' + e);
-        }
-      }
+      plugin.isReady().then(function(res) {
+        ttsState.ready = !!(res && res.ready);
+        ttsState.failed = !!(res && res.failed);
+        ttsState.reason = (res && res.reason) || '';
+        ttsState.language = (res && res.language) || '';
 
-      // 方法3: 震动
+        if (ttsState.ready) {
+          var note = ttsState.reason === 'missing_chinese_voice' ? '（缺少中文语音包）' : '';
+          updateTTSStatus('语音已就绪 ' + ttsState.language + note);
+          log('语音就绪: ' + ttsState.language + (note ? ' ' + note : ''));
+          return;
+        }
+        if (ttsState.failed) {
+          updateTTSStatus('语音不可用：' + reasonText(ttsState.reason));
+          log('语音不可用: ' + reasonText(ttsState.reason));
+          return;
+        }
+        updateTTSStatus('语音初始化中...');
+        if (attempt < 6) {
+          setTimeout(function() { initTTS(attempt + 1); }, 500);
+        } else {
+          updateTTSStatus('语音初始化超时，请检查系统 TTS 设置');
+          log('语音初始化超时');
+        }
+      }).catch(function(e) {
+        log('语音状态查询失败: ' + (e && e.message ? e.message : e));
+        if (attempt < 3) {
+          setTimeout(function() { initTTS(attempt + 1); }, 800);
+        }
+      });
+    }
+
+    function vibrateAlert() {
       if (navigator.vibrate) {
-        navigator.vibrate([300, 100, 300, 100, 300]);
-        log('震动提醒');
+        navigator.vibrate([400, 120, 400]);
       }
+    }
+
+    function speak(text, attempt) {
+      attempt = attempt || 0;
+      if (!ttsConfig.enabled) return;
+      var plugin = getTTSPlugin();
+
+      if (plugin && ttsState.ready) {
+        plugin.speak({
+          text: text,
+          rate: ttsConfig.rate,
+          volume: ttsConfig.volume
+        }).then(function() {
+          log('播报: ' + text);
+        }).catch(function(e) {
+          log('播报失败: ' + (e && e.message ? e.message : e) + '，改用震动');
+          vibrateAlert();
+        });
+        return;
+      }
+
+      // 引擎可能还在初始化，稍后重试
+      if (plugin && !ttsState.failed && attempt < 2) {
+        setTimeout(function() { speak(text, attempt + 1); }, 600);
+        return;
+      }
+
+      log('语音未就绪（' + reasonText(ttsState.reason) + '），震动提醒');
+      vibrateAlert();
     }
 
     // ===== TTS UI 绑定 =====
@@ -292,15 +353,13 @@
       speak('你好，坐姿检测语音测试。');
     });
     document.getElementById('ttsDebugBtn').addEventListener('click', function() {
-      var info = '';
-      if (window.Android && window.Android.debug) {
-        info = window.Android.debug();
-      } else {
-        info = 'Android接口不可用 | speechSynthesis=' + !!window.speechSynthesis;
-        if (window.speechSynthesis) {
-          info += ' | voices=' + (speechSynthesis.getVoices() || []).length;
-        }
-      }
+      var plugin = getTTSPlugin();
+      var info = 'plugin=' + (plugin ? 'ok' : 'missing') +
+                 ' | ready=' + ttsState.ready +
+                 ' | failed=' + ttsState.failed +
+                 ' | reason=' + (ttsState.reason || '-') +
+                 ' | lang=' + (ttsState.language || '-') +
+                 ' | vibrate=' + !!navigator.vibrate;
       log('诊断: ' + info);
       alert(info);
     });
@@ -505,12 +564,11 @@
 
     // ===== 初始化 =====
     initTTS();
-    setTimeout(initTTS, 1000);
-    setTimeout(initTTS, 3000);
 
     window.addEventListener('beforeunload', function() {
       if (cameraInstance) cameraInstance.stop();
-      if (window.speechSynthesis) speechSynthesis.cancel();
+      var plugin = getTTSPlugin();
+      if (plugin) plugin.stop().catch(function() {});
     });
   </script>
 </body>
