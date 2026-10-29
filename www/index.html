@@ -230,7 +230,8 @@
         missing_chinese_voice: '缺少中文语音包，已使用系统默认语言',
         no_voice_data: '系统没有可用的语音数据，请安装 TTS 引擎（如 Google 语音服务）',
         tts_unavailable: 'TTS 引擎不可用',
-        no_plugin: '原生语音插件未加载'
+        no_plugin: '原生语音插件未加载',
+        plugin_error: '原生插件调用失败，请确认安装的是最新构建'
       };
       if (reason && reason.indexOf('tts_init_failed') === 0) {
         return 'TTS 引擎初始化失败（' + reason + '）';
@@ -283,6 +284,10 @@
         log('语音状态查询失败: ' + (e && e.message ? e.message : e));
         if (attempt < 3) {
           setTimeout(function() { initTTS(attempt + 1); }, 800);
+        } else {
+          ttsState.failed = true;
+          ttsState.reason = 'plugin_error';
+          updateTTSStatus('语音不可用：原生插件调用失败');
         }
       });
     }
